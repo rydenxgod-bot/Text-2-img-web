@@ -1,20 +1,17 @@
-
 {
   "name": "rydenxgod-ai-studio",
-  "version": "1.6.0",
+  "version": "1.6.3",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "lucide-react": "^0.460.0",
-    "clsx": "^2.1.1",
-    "tailwind-merge": "^2.5.4"
+    "@google/genai": "^1.38.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
