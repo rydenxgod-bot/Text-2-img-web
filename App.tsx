@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Tab, GalleryItem, UserStats, AppSettings } from './types';
 import Sidebar from './components/Sidebar';
 import Toast, { ToastType } from './components/Toast';
@@ -21,13 +21,16 @@ const App: React.FC = () => {
     wordCounts: {}
   });
   const [settings, setSettings] = useState<AppSettings>({
-    theme: 'dark', // Switched default to dark
+    theme: 'dark',
     lastGeneration: 0
   });
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [toast, setToast] = useState<{ message: string; type: ToastType } | null>(null);
   const [selectedImage, setSelectedImage] = useState<{ images: string[], index: number, prompt: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Ref for auto-scrolling to results
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const savedGallery = localStorage.getItem('ryden_gallery');
@@ -37,7 +40,6 @@ const App: React.FC = () => {
     if (savedGallery) setGallery(JSON.parse(savedGallery));
     if (savedStats) setStats(JSON.parse(savedStats));
     
-    // Theme initialization
     if (savedSettings) {
       const s = JSON.parse(savedSettings);
       setSettings(s);
@@ -47,7 +49,6 @@ const App: React.FC = () => {
         document.documentElement.classList.remove('dark');
       }
     } else {
-      // Default to dark for new users
       document.documentElement.classList.add('dark');
     }
   }, []);
@@ -63,6 +64,16 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('ryden_settings', JSON.stringify(settings));
   }, [settings]);
+
+  // Auto-scroll logic when gallery updates with new items
+  useEffect(() => {
+    if (gallery.length > 0 && activeTab === Tab.GENERATE && !isGenerating) {
+      const timeoutId = setTimeout(() => {
+        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [gallery, activeTab, isGenerating]);
 
   const showToast = (message: string, type: ToastType = 'info') => setToast({ message, type });
 
@@ -94,22 +105,20 @@ const App: React.FC = () => {
     setAbortController(ctrl);
     setIsGenerating(true);
     setProgress(0);
-    setStatusText("Preparing...");
+    setStatusText("Initializing Engines...");
 
     try {
-      const resultImages = await fetchImages(prompt, (p, s) => {
+      const { images, sources } = await fetchImages(prompt, (p, s) => {
         setProgress(p);
         setStatusText(s);
       }, ctrl.signal);
 
-      // We explicitly expect 3 engines in this sequence
-      const engineNames = ['Pollination', 'Flux Ai', 'Small Version'];
       const newItem: GalleryItem = {
         id: crypto.randomUUID(),
-        images: resultImages,
+        images: images,
         prompt: prompt,
         timestamp: Date.now(),
-        sources: engineNames.slice(0, resultImages.length)
+        sources: sources
       };
 
       setGallery(prev => [newItem, ...prev]);
@@ -120,24 +129,24 @@ const App: React.FC = () => {
 
       setStats(prev => ({
         ...prev,
-        totalGenerated: prev.totalGenerated + resultImages.length,
+        totalGenerated: prev.totalGenerated + images.length,
         totalPrompts: prev.totalPrompts + 1,
         apiCalls: {
-          flux: (prev.apiCalls.flux || 0) + 1,
-          smallVersion: (prev.apiCalls.smallVersion || 0) + 1,
-          pollination: (prev.apiCalls.pollination || 0) + 1,
+          flux: prev.apiCalls.flux + (sources.includes('Flux Ai') ? 1 : 0),
+          smallVersion: prev.apiCalls.smallVersion + (sources.includes('Small Version') ? 1 : 0),
+          pollination: prev.apiCalls.pollination + (sources.includes('Pollination') ? 1 : 0),
         },
         wordCounts: newWordCounts
       }));
 
       setSettings(prev => ({ ...prev, lastGeneration: Date.now() }));
-      showToast(`Generated ${resultImages.length} artwork variations!`, "success");
+      showToast(`Studio set generated successfully!`, "success");
       setPrompt('');
     } catch (error: any) {
       if (error.name === 'AbortError') {
         showToast("Generation cancelled", "info");
       } else {
-        showToast(error.message || "Generation error occurred", "error");
+        showToast(error.message || "Engine failure", "error");
       }
     } finally {
       setIsGenerating(false);
@@ -164,7 +173,7 @@ const App: React.FC = () => {
 
   const downloadImage = async (url: string, filename: string) => {
     try {
-      showToast("Fetching image for download...", "info");
+      showToast("Downloading...", "info");
       const res = await fetch(url);
       if (!res.ok) throw new Error("Fetch failed");
       const blob = await res.blob();
@@ -180,7 +189,7 @@ const App: React.FC = () => {
       setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
       showToast("Download started!", "success");
     } catch (error) {
-      console.error("Direct download failed, attempting alternate...", error);
+      console.error("Direct download failed", error);
       const link = document.createElement('a');
       link.href = url;
       link.download = filename;
@@ -202,22 +211,22 @@ const App: React.FC = () => {
   }, [gallery]);
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-screen">
+    <div className="flex flex-col lg:flex-row min-h-screen selection:bg-indigo-500 selection:text-white">
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
       <main className="flex-1 p-4 lg:p-10 pb-24 lg:pb-10 max-w-[1400px] mx-auto w-full">
-        <header className="flex justify-between items-center mb-8">
+        <header className="flex justify-between items-center mb-10">
           <div>
-            <h2 className="text-sm font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-1">
+            <h2 className="text-sm font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500 mb-1">
               {activeTab}
             </h2>
             <div className="flex items-center space-x-2">
-              <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
-              <span className="text-xs font-medium text-slate-500">Engines Online: 3/3</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Intelligent Engine Control</span>
             </div>
           </div>
           <div className="flex items-center space-x-4">
-            <button onClick={toggleTheme} className="p-3 rounded-full bg-white dark:bg-slate-800 shadow-md border border-slate-200 dark:border-slate-700">
+            <button onClick={toggleTheme} className="p-3.5 rounded-2xl bg-white dark:bg-slate-800 shadow-xl border border-slate-200 dark:border-slate-700 hover:scale-110 active:scale-90 transition-all">
               {settings.theme === 'light' ? '🌙' : '☀️'}
             </button>
           </div>
@@ -225,58 +234,58 @@ const App: React.FC = () => {
 
         <div className="animate-fade-in">
           {activeTab === Tab.GENERATE && (
-            <section className="space-y-8">
-              <div className="text-center mb-10">
-                <h1 className="text-4xl lg:text-5xl font-extrabold mb-4 tracking-tight">
+            <section className="space-y-12">
+              <div className="text-center mb-12">
+                <h1 className="text-5xl lg:text-7xl font-black mb-6 tracking-tighter">
                   <span className="gradient-text">RydenXGod</span> Studio
                 </h1>
-                <p className="text-slate-500 dark:text-slate-400 max-w-2xl mx-auto italic font-semibold">
-                  Pollination • Flux • Small Version
+                <p className="text-slate-500 dark:text-slate-400 max-w-2xl mx-auto italic font-bold tracking-wide uppercase text-xs">
+                  Pro Engine Distribution • Vercel v1.6.2
                 </p>
               </div>
 
-              <div className="max-w-4xl mx-auto space-y-6">
-                <div className="relative glass rounded-3xl p-1 shadow-2xl overflow-hidden group">
+              <div className="max-w-4xl mx-auto space-y-8">
+                <div className="relative glass rounded-[2.5rem] p-1.5 shadow-2xl overflow-hidden group border border-white/20 dark:border-slate-700">
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="Describe your vision (up to 1000 characters)..."
+                    placeholder="Describe your vision..."
                     disabled={isGenerating}
                     maxLength={MAX_PROMPT_CHARS}
-                    className="w-full h-40 lg:h-52 bg-white/50 dark:bg-slate-800/50 p-8 rounded-2xl focus:outline-none text-xl resize-none placeholder:text-slate-300 dark:placeholder:text-slate-600 font-medium"
+                    className="w-full h-44 lg:h-60 bg-white/40 dark:bg-slate-800/40 p-10 rounded-[2rem] focus:outline-none text-2xl lg:text-3xl font-medium resize-none placeholder:text-slate-300 dark:placeholder:text-slate-700 transition-all"
                   />
-                  <div className="absolute bottom-6 right-8 text-xs font-bold text-slate-400">
+                  <div className="absolute bottom-8 right-10 text-[10px] font-black tracking-widest text-slate-400 uppercase">
                     {prompt.length} / {MAX_PROMPT_CHARS}
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex flex-col sm:flex-row gap-5">
                   {!isGenerating ? (
                     <button
                       onClick={handleGenerate}
                       disabled={prompt.length < MIN_PROMPT_CHARS}
-                      className="flex-1 py-5 rounded-2xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-black text-lg shadow-lg hover:-translate-y-1 active:scale-95 transition-all disabled:opacity-50 uppercase tracking-widest"
+                      className="flex-1 py-6 rounded-[1.5rem] bg-gradient-to-br from-indigo-600 to-purple-700 text-white font-black text-xl shadow-[0_20px_40px_rgba(79,70,229,0.4)] hover:-translate-y-1.5 active:scale-95 transition-all disabled:opacity-30 uppercase tracking-[0.2em]"
                     >
-                      ✨ Create Triple Artwork
+                      🚀 Generate Studio Set
                     </button>
                   ) : (
-                    <div className="flex-1 space-y-4">
+                    <div className="flex-1 space-y-6 bg-white/5 dark:bg-slate-800/20 p-8 rounded-[2rem] border border-white/10 dark:border-slate-700">
                       <div className="flex items-center justify-between px-2">
-                        <span className="text-sm font-bold text-indigo-500 animate-pulse">{statusText}</span>
-                        <span className="text-sm font-bold text-slate-400">{progress}%</span>
+                        <span className="text-xs font-black text-indigo-500 uppercase tracking-[0.3em] animate-pulse">{statusText}</span>
+                        <span className="text-xs font-black text-slate-400">{progress}%</span>
                       </div>
-                      <div className="h-4 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
-                        <div className="h-full bg-indigo-500 transition-all duration-300 progress-bar-fill shadow-[0_0_10px_rgba(99,102,241,0.5)]" style={{ width: `${progress}%` }} />
+                      <div className="h-3 w-full bg-slate-200 dark:bg-slate-700/50 rounded-full overflow-hidden p-0.5">
+                        <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500 progress-bar-fill shadow-[0_0_20px_rgba(99,102,241,0.6)]" style={{ width: `${progress}%` }} />
                       </div>
-                      <button onClick={handleCancel} className="w-full py-2 text-xs font-black uppercase tracking-widest text-slate-500 hover:text-red-500 transition-colors">Cancel Request</button>
+                      <button onClick={handleCancel} className="w-full py-2 text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 hover:text-red-500 transition-colors">Abort Task</button>
                     </div>
                   )}
                 </div>
 
-                <div className="pt-6">
-                  <div className="flex flex-wrap gap-2">
+                <div className="pt-4">
+                  <div className="flex flex-wrap gap-3 justify-center">
                     {EXAMPLE_PROMPTS.map((p, i) => (
-                      <button key={i} onClick={() => setPrompt(p)} className="px-5 py-2 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm font-medium hover:border-indigo-500 hover:text-indigo-600 transition-all shadow-sm">
+                      <button key={i} onClick={() => setPrompt(p)} className="px-6 py-2.5 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold uppercase tracking-wider hover:border-indigo-500 hover:text-indigo-500 hover:scale-105 active:scale-95 transition-all shadow-sm">
                         {p}
                       </button>
                     ))}
@@ -285,29 +294,31 @@ const App: React.FC = () => {
               </div>
 
               {gallery.length > 0 && !isGenerating && (
-                <div className="mt-16">
-                   <h2 className="text-3xl font-black mb-10 flex items-center justify-center">
-                     <span className="bg-indigo-500 text-white px-3 py-1 rounded-xl mr-3 text-lg">3</span>
+                <div ref={resultsRef} className="mt-20 scroll-mt-20">
+                   <h2 className="text-4xl font-black mb-12 flex items-center justify-center tracking-tighter uppercase italic">
+                     <span className="bg-indigo-600 text-white w-10 h-10 flex items-center justify-center rounded-2xl mr-4 text-xl not-italic shadow-lg">
+                       {gallery[0].images.length}
+                     </span>
                      Engine Results
                    </h2>
-                   <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                   <div className={`grid grid-cols-1 ${gallery[0].images.length === 3 ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-10 max-w-6xl mx-auto`}>
                       {gallery[0].images.map((img, i) => (
-                        <div key={i} className="group relative rounded-[2.5rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.1)] aspect-square bg-slate-200 dark:bg-slate-800 border-4 border-white dark:border-slate-700 transition-all hover:shadow-2xl">
+                        <div key={i} className="group relative rounded-[3rem] overflow-hidden shadow-[0_30px_70px_rgba(0,0,0,0.2)] aspect-square bg-slate-200 dark:bg-slate-800 border-[6px] border-white dark:border-slate-700 transition-all hover:shadow-2xl">
                           <img 
                             src={img} 
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-[2s] ease-out cursor-zoom-in" 
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-[2.5s] ease-out cursor-zoom-in" 
                             onClick={() => setSelectedImage({ images: gallery[0].images, index: i, prompt: gallery[0].prompt })}
-                            alt={`${gallery[0].sources[i]} Generation`}
+                            alt={`Engine: ${gallery[0].sources[i]}`}
                             loading="lazy"
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-500 flex flex-col justify-end p-8">
-                            <div className="flex flex-col space-y-4">
-                              <span className="text-white text-xs font-black uppercase tracking-[0.3em]">{gallery[0].sources[i] || `Result ${i + 1}`}</span>
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-all duration-700 flex flex-col justify-end p-10">
+                            <div className="flex flex-col space-y-5 transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
+                              <span className="text-white text-[10px] font-black uppercase tracking-[0.5em] text-center opacity-70">{gallery[0].sources[i] || `Source ${i + 1}`}</span>
                               <button 
                                 onClick={(e) => { e.stopPropagation(); downloadImage(img, `ryden-${gallery[0].sources[i]?.toLowerCase().replace(/\s+/g, '-') || 'ai'}.png`); }}
-                                className="w-full py-3 bg-white text-black text-xs font-black rounded-xl hover:bg-slate-100 active:scale-95 transition-all uppercase tracking-widest shadow-xl"
+                                className="w-full py-4 bg-white text-black text-[10px] font-black rounded-2xl hover:bg-slate-100 active:scale-95 transition-all uppercase tracking-[0.3em] shadow-2xl"
                               >
-                                Download Artwork
+                                Download Pro
                               </button>
                             </div>
                           </div>
@@ -320,55 +331,55 @@ const App: React.FC = () => {
           )}
 
           {activeTab === Tab.GALLERY && (
-            <section className="space-y-8">
-              <div className="flex justify-between items-center">
-                <h1 className="text-4xl font-black">History</h1>
-                <div className="flex items-center space-x-4">
+            <section className="space-y-10">
+              <div className="flex flex-col md:flex-row justify-between items-center gap-6">
+                <h1 className="text-5xl font-black tracking-tighter uppercase">Archives</h1>
+                <div className="flex items-center space-x-4 w-full md:w-auto">
                   <input 
                     type="text"
-                    placeholder="Search gallery..."
+                    placeholder="Search archives..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="px-6 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-full text-sm outline-none focus:ring-2 ring-indigo-500 w-72 shadow-sm"
+                    className="flex-1 md:w-80 px-8 py-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-[1.5rem] text-sm font-bold outline-none focus:ring-4 ring-indigo-500/20 shadow-sm"
                   />
-                  <button onClick={clearGallery} className="text-red-500 font-black text-xs uppercase tracking-widest bg-red-50 dark:bg-red-900/10 px-6 py-2.5 rounded-full hover:bg-red-100 transition-colors">Wipe All</button>
+                  <button onClick={clearGallery} className="text-red-500 font-black text-[10px] uppercase tracking-[0.3em] bg-red-50 dark:bg-red-900/10 px-8 py-4 rounded-[1.5rem] hover:bg-red-100 transition-all">Clear All</button>
                 </div>
               </div>
               {filteredGallery.length === 0 ? (
-                <div className="text-center py-40 glass rounded-3xl border-2 border-dashed border-slate-300 dark:border-slate-700">
-                  <p className="text-5xl mb-6">🏜️</p>
-                  <p className="text-slate-400 font-bold uppercase tracking-widest">No history recorded</p>
+                <div className="text-center py-48 glass rounded-[3.5rem] border-4 border-dashed border-slate-200 dark:border-slate-700">
+                  <p className="text-7xl mb-8">🏜️</p>
+                  <p className="text-slate-400 font-black uppercase tracking-[0.4em] text-sm">Void Detected</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10">
                   {filteredGallery.map((item) => (
-                    <div key={item.id} className="glass rounded-[2.5rem] overflow-hidden shadow-lg border border-slate-200 dark:border-slate-700 group transition-all hover:-translate-y-2">
+                    <div key={item.id} className="glass rounded-[3rem] overflow-hidden shadow-xl border border-slate-200 dark:border-slate-700 group transition-all hover:-translate-y-3 hover:shadow-2xl">
                       <div className="relative aspect-square">
                         <img 
                           src={item.images[0]} 
                           className="w-full h-full object-cover cursor-zoom-in" 
                           onClick={() => setSelectedImage({ images: item.images, index: 0, prompt: item.prompt })} 
-                          alt="History Artwork"
+                          alt="Archive Art"
                         />
-                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center p-6 space-y-4">
+                        <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-all duration-500 flex flex-col items-center justify-center p-8 space-y-4">
                            <button 
-                             onClick={() => downloadImage(item.images[0], 'ryden-gallery.png')}
-                             className="w-full py-3 bg-white text-black font-black rounded-xl text-[10px] uppercase tracking-[0.2em] shadow-2xl"
+                             onClick={() => downloadImage(item.images[0], 'ryden-archive.png')}
+                             className="w-full py-4 bg-white text-black font-black text-[9px] uppercase tracking-[0.3em] rounded-2xl shadow-2xl"
                            >
                              Download
                            </button>
                            <button 
                              onClick={() => setPrompt(item.prompt) || setActiveTab(Tab.GENERATE)}
-                             className="w-full py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase tracking-[0.2em] shadow-2xl"
+                             className="w-full py-4 bg-indigo-600 text-white font-black text-[9px] uppercase tracking-[0.3em] rounded-2xl shadow-2xl"
                            >
-                             Reuse Concept
+                             Reuse
                            </button>
                         </div>
                       </div>
-                      <div className="p-5 flex justify-between items-center bg-white/40 dark:bg-slate-800/40">
-                         <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{new Date(item.timestamp).toLocaleDateString()}</span>
-                         <button onClick={() => deleteGalleryItem(item.id)} className="text-red-500 hover:scale-110 transition-transform">
-                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      <div className="p-6 flex justify-between items-center bg-white/40 dark:bg-slate-800/40">
+                         <span className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">{new Date(item.timestamp).toLocaleDateString()}</span>
+                         <button onClick={() => deleteGalleryItem(item.id)} className="text-red-500 hover:scale-125 transition-transform p-2">
+                           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                          </button>
                       </div>
                     </div>
@@ -379,45 +390,45 @@ const App: React.FC = () => {
           )}
 
           {activeTab === Tab.STATS && (
-            <section className="space-y-10">
-              <h1 className="text-4xl font-black">Studio Intelligence</h1>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <section className="space-y-12">
+              <h1 className="text-5xl font-black tracking-tighter uppercase">Intelligence</h1>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
                 {[
-                  { label: "Total Artwork", value: stats.totalGenerated, color: "from-blue-500 to-cyan-500" },
-                  { label: "Creative Prompts", value: stats.totalPrompts, color: "from-purple-500 to-indigo-500" },
-                  { label: "Gallery Sets", value: gallery.length, color: "from-green-500 to-teal-500" },
-                  { label: "API Efficiency", value: `${usageLimitPercent}%`, color: "from-orange-500 to-red-500" },
+                  { label: "Neural Output", value: stats.totalGenerated, color: "from-blue-600 to-indigo-600" },
+                  { label: "Creative Cycles", value: stats.totalPrompts, color: "from-purple-600 to-pink-600" },
+                  { label: "Archive Nodes", value: gallery.length, color: "from-emerald-600 to-teal-600" },
+                  { label: "Efficiency", value: `${usageLimitPercent}%`, color: "from-orange-600 to-rose-600" },
                 ].map((s, i) => (
-                  <div key={i} className="glass p-8 rounded-3xl border border-slate-200 dark:border-slate-700 relative overflow-hidden transition-all hover:scale-105">
-                    <div className={`absolute top-0 right-0 w-24 h-24 bg-gradient-to-br ${s.color} opacity-10 rounded-bl-[100px] -mr-6 -mt-6`}></div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-2">{s.label}</p>
-                    <p className="text-4xl font-black">{s.value}</p>
+                  <div key={i} className="glass p-10 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 relative overflow-hidden transition-all hover:scale-[1.03]">
+                    <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-br ${s.color} opacity-10 rounded-bl-[120px] -mr-8 -mt-8`}></div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 mb-3">{s.label}</p>
+                    <p className="text-5xl font-black tracking-tighter">{s.value}</p>
                   </div>
                 ))}
               </div>
               
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                <div className="glass p-10 rounded-[2.5rem] border border-slate-200 dark:border-slate-700">
-                  <h3 className="text-xl font-black mb-10 uppercase tracking-[0.2em] flex items-center">
-                    <span className="w-2 h-6 bg-indigo-500 rounded-full mr-3"></span>
-                    Engine Balance
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                <div className="glass p-12 rounded-[3.5rem] border border-slate-200 dark:border-slate-700">
+                  <h3 className="text-2xl font-black mb-12 uppercase tracking-[0.3em] flex items-center">
+                    <span className="w-3 h-8 bg-indigo-600 rounded-full mr-4"></span>
+                    Neural Distribution
                   </h3>
-                  <div className="space-y-10">
+                  <div className="space-y-12">
                     {[
-                      { label: 'Pollination Real-Time', key: 'pollination', color: 'bg-emerald-500' },
-                      { label: 'Flux High Performance', key: 'flux', color: 'bg-blue-500' },
-                      { label: 'Small Version AI', key: 'smallVersion', color: 'bg-purple-500' }
+                      { label: 'Pollination Core', key: 'pollination', color: 'bg-emerald-500' },
+                      { label: 'Flux High Definition', key: 'flux', color: 'bg-indigo-500' },
+                      { label: 'Small Version Lite', key: 'smallVersion', color: 'bg-purple-500' }
                     ].map((engine) => {
                       const count = stats.apiCalls[engine.key as keyof typeof stats.apiCalls] || 0;
                       const percentage = stats.totalPrompts > 0 ? (count / stats.totalPrompts) * 100 : 0;
                       return (
-                        <div key={engine.key} className="space-y-4">
-                          <div className="flex justify-between text-[10px] font-black uppercase tracking-[0.2em]">
+                        <div key={engine.key} className="space-y-5">
+                          <div className="flex justify-between text-[11px] font-black uppercase tracking-[0.3em]">
                             <span className="text-slate-500">{engine.label}</span>
-                            <span>{count} Requests</span>
+                            <span>{count} Ops</span>
                           </div>
-                          <div className="h-4 w-full bg-slate-100 dark:bg-slate-700/40 rounded-full overflow-hidden p-1">
-                            <div className={`h-full ${engine.color} rounded-full transition-all duration-[1.5s] ease-out shadow-[0_0_15px_rgba(0,0,0,0.1)]`} style={{ width: `${percentage}%` }} />
+                          <div className="h-5 w-full bg-slate-100 dark:bg-slate-700/40 rounded-full overflow-hidden p-1.5 shadow-inner">
+                            <div className={`h-full ${engine.color} rounded-full transition-all duration-[2s] ease-out shadow-[0_0_20px_rgba(0,0,0,0.15)]`} style={{ width: `${percentage}%` }} />
                           </div>
                         </div>
                       );
@@ -425,51 +436,51 @@ const App: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="glass p-10 rounded-[2.5rem] border border-slate-200 dark:border-slate-700 flex flex-col justify-center items-center text-center">
-                   <div className="w-24 h-24 bg-indigo-600 rounded-[2rem] flex items-center justify-center text-white text-4xl mb-8 shadow-2xl shadow-indigo-500/40 animate-bounce-slow">🚀</div>
-                   <h3 className="text-3xl font-black mb-4 uppercase tracking-tighter">Studio Pro Status</h3>
-                   <p className="text-slate-400 font-medium max-w-xs mx-auto">You have processed {Object.keys(stats.wordCounts).length} creative tokens across your generation history.</p>
+                <div className="glass p-12 rounded-[3.5rem] border border-slate-200 dark:border-slate-700 flex flex-col justify-center items-center text-center">
+                   <div className="w-28 h-28 bg-indigo-600 rounded-[2.5rem] flex items-center justify-center text-white text-5xl mb-10 shadow-[0_30px_60px_rgba(79,70,229,0.4)] animate-pulse">🌌</div>
+                   <h3 className="text-4xl font-black mb-5 uppercase tracking-tighter">Studio Pro v1.6.2</h3>
+                   <p className="text-slate-500 dark:text-slate-400 font-bold uppercase tracking-widest text-xs max-w-xs leading-loose">Optimized Logic: Priority Engines First.</p>
                 </div>
               </div>
             </section>
           )}
 
           {activeTab === Tab.INFO && (
-            <section className="max-w-4xl space-y-10">
-              <h1 className="text-4xl font-black">Studio Manifesto</h1>
-              <div className="glass p-12 rounded-[3.5rem] border border-slate-200 dark:border-slate-700 space-y-10 relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-12 opacity-[0.03] pointer-events-none">
-                  <svg className="w-64 h-64" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L1 21h22L12 2zm0 3.45L18.91 19H5.09L12 5.45z"/></svg>
+            <section className="max-w-5xl mx-auto space-y-12">
+              <h1 className="text-5xl font-black tracking-tighter uppercase">Manifesto</h1>
+              <div className="glass p-14 rounded-[4rem] border border-slate-200 dark:border-slate-700 space-y-12 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-16 opacity-[0.05] pointer-events-none">
+                  <svg className="w-80 h-80" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L1 21h22L12 2zm0 3.45L18.91 19H5.09L12 5.45z"/></svg>
                 </div>
                 
-                <div className="space-y-6">
-                  <h3 className="text-3xl font-black uppercase tracking-tighter italic">RydenXGod AI Studio v1.6</h3>
-                  <p className="text-xl leading-relaxed text-slate-500 dark:text-slate-400 font-medium">
-                    A multi-brain architectural interface. By linking Pollination, Flux, and Small Version engines, we deliver a curated triple-output for every single prompt.
+                <div className="space-y-8">
+                  <h3 className="text-4xl font-black uppercase tracking-tighter italic">RydenXGod AI Studio PRO</h3>
+                  <p className="text-2xl leading-relaxed text-slate-500 dark:text-slate-400 font-medium tracking-tight">
+                    Optimized multi-engine architecture. Parallelized generation across Pollination and Flux with emergency fallback protocol.
                   </p>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="p-8 bg-white/50 dark:bg-slate-900/50 rounded-3xl border border-slate-100 dark:border-slate-800 transition-all hover:bg-white dark:hover:bg-slate-900 shadow-sm">
-                    <h4 className="font-black text-xs uppercase tracking-[0.3em] mb-4 text-indigo-600">Secure Vault</h4>
-                    <p className="text-sm text-slate-500 leading-relaxed font-medium">Local-first storage protocol. Your masterpieces never leave your browser context unless you export them.</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                  <div className="p-10 bg-white/50 dark:bg-slate-900/50 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 transition-all hover:bg-white dark:hover:bg-slate-900 shadow-sm">
+                    <h4 className="font-black text-[11px] uppercase tracking-[0.4em] mb-5 text-indigo-600">Dynamic Scaling</h4>
+                    <p className="text-sm text-slate-500 leading-relaxed font-bold uppercase tracking-wide opacity-80">Automatically activates Small Version AI only in failed primary scenarios to conserve resource bandwidth.</p>
                   </div>
-                  <div className="p-8 bg-white/50 dark:bg-slate-900/50 rounded-3xl border border-slate-100 dark:border-slate-800 transition-all hover:bg-white dark:hover:bg-slate-900 shadow-sm">
-                    <h4 className="font-black text-xs uppercase tracking-[0.3em] mb-4 text-indigo-600">Triple Compute</h4>
-                    <p className="text-sm text-slate-500 leading-relaxed font-medium">Concurrent asynchronous processing ensures variety in style, depth, and interpretation for every vision.</p>
+                  <div className="p-10 bg-white/50 dark:bg-slate-900/50 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 transition-all hover:bg-white dark:hover:bg-slate-900 shadow-sm">
+                    <h4 className="font-black text-[11px] uppercase tracking-[0.4em] mb-5 text-indigo-600">Vercel Edge Integration</h4>
+                    <p className="text-sm text-slate-500 leading-relaxed font-bold uppercase tracking-wide opacity-80">Full SPA support for persistent high-performance deployment on Vercel infrastructure.</p>
                   </div>
                 </div>
 
-                <div className="pt-8 flex flex-col sm:flex-row items-center gap-6">
-                  <a href="https://t.me/RydenXGod" target="_blank" rel="noreferrer" className="w-full sm:w-auto px-10 py-5 bg-indigo-600 text-white rounded-2xl font-black shadow-[0_20px_40px_rgba(79,70,229,0.3)] hover:scale-105 active:scale-95 transition-all text-center uppercase tracking-[0.2em] text-xs">
-                    Access Community
+                <div className="pt-10 flex flex-col sm:flex-row items-center gap-8">
+                  <a href="https://t.me/RydenXGod" target="_blank" rel="noreferrer" className="w-full sm:w-auto px-12 py-7 bg-indigo-600 text-white rounded-[1.5rem] font-black shadow-[0_25px_50px_rgba(79,70,229,0.4)] hover:scale-105 active:scale-95 transition-all text-center uppercase tracking-[0.3em] text-[10px]">
+                    Access Telegram
                   </a>
-                  <a href="https://t.me/PromptVerseX" target="_blank" rel="noreferrer" className="w-full sm:w-auto px-10 py-5 bg-purple-600 text-white rounded-2xl font-black shadow-[0_20px_40px_rgba(147,51,234,0.3)] hover:scale-105 active:scale-95 transition-all text-center uppercase tracking-[0.2em] text-xs">
-                    Get Free Prompt
+                  <a href="https://t.me/PromptVerseX" target="_blank" rel="noreferrer" className="w-full sm:w-auto px-12 py-7 bg-purple-600 text-white rounded-[1.5rem] font-black shadow-[0_25px_50px_rgba(147,51,234,0.4)] hover:scale-105 active:scale-95 transition-all text-center uppercase tracking-[0.3em] text-[10px]">
+                    Get Free Prompts
                   </a>
-                  <div className="flex flex-col items-center sm:items-start">
-                    <span className="text-[10px] font-black uppercase tracking-[0.4em] text-slate-400 mb-1">Authorization</span>
-                    <span className="text-sm font-black text-indigo-500 tracking-widest">VERIFIED-PRO</span>
+                  <div className="flex flex-col items-center sm:items-start ml-auto">
+                    <span className="text-[9px] font-black uppercase tracking-[0.5em] text-slate-400 mb-1">Deployment Status</span>
+                    <span className="text-base font-black text-indigo-500 tracking-[0.2em] uppercase">Vercel Ready v1.6.2</span>
                   </div>
                 </div>
               </div>
@@ -478,36 +489,36 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Advanced Zoom Modal */}
+      {/* Extreme Zoom Modal */}
       {selectedImage && (
-        <div className="fixed inset-0 z-[100] bg-black/98 flex flex-col items-center justify-center p-4 animate-fade-in backdrop-blur-2xl" onClick={() => setSelectedImage(null)}>
-          <button className="absolute top-10 right-10 text-white/40 hover:text-white text-4xl hover:rotate-90 transition-all duration-300">✕</button>
+        <div className="fixed inset-0 z-[100] bg-black/98 flex flex-col items-center justify-center p-6 animate-fade-in backdrop-blur-3xl" onClick={() => setSelectedImage(null)}>
+          <button className="absolute top-12 right-12 text-white/30 hover:text-white text-5xl hover:rotate-90 transition-all duration-500">✕</button>
           
-          <div className="max-w-5xl w-full flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+          <div className="max-w-6xl w-full flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
             <div className="relative group/modal w-full flex justify-center">
               <img 
                 src={selectedImage.images[selectedImage.index]} 
-                className="max-h-[75vh] w-auto rounded-[3.5rem] shadow-[0_0_100px_rgba(0,0,0,0.6)] border-[10px] border-white/10 transition-all group-hover/modal:border-white/20" 
-                alt="Studio Zoom"
+                className="max-h-[70vh] w-auto rounded-[4rem] shadow-[0_0_120px_rgba(0,0,0,0.7)] border-[12px] border-white/10 transition-all group-hover/modal:border-white/20" 
+                alt="High-Def Zoom"
               />
             </div>
 
-            <div className="mt-14 flex flex-col items-center space-y-10 w-full max-w-xl">
-              <div className="flex items-center justify-between w-full px-8">
+            <div className="mt-16 flex flex-col items-center space-y-12 w-full max-w-2xl">
+              <div className="flex items-center justify-between w-full px-12">
                 <button 
                   disabled={selectedImage.index === 0}
                   onClick={() => setSelectedImage(prev => prev ? ({ ...prev, index: prev.index - 1 }) : null)}
-                  className="p-5 bg-white/5 text-white rounded-full disabled:opacity-5 hover:bg-white/10 transition-all active:scale-90"
+                  className="p-6 bg-white/5 text-white rounded-full disabled:opacity-5 hover:bg-white/10 transition-all active:scale-90 shadow-2xl"
                 >
-                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7" /></svg>
+                  <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" /></svg>
                 </button>
                 
-                <div className="flex space-x-4">
+                <div className="flex space-x-5">
                    {selectedImage.images.map((_, i) => (
                      <button 
                        key={i} 
                        onClick={() => setSelectedImage(prev => prev ? ({ ...prev, index: i }) : null)}
-                       className={`w-4 h-4 rounded-full border-2 transition-all duration-500 ${selectedImage.index === i ? 'bg-indigo-500 border-indigo-500 scale-150 shadow-[0_0_20px_rgba(99,102,241,0.6)]' : 'bg-transparent border-white/20 hover:border-white/50'}`}
+                       className={`w-5 h-5 rounded-full border-2 transition-all duration-700 ${selectedImage.index === i ? 'bg-indigo-500 border-indigo-500 scale-[1.7] shadow-[0_0_30px_rgba(99,102,241,0.8)]' : 'bg-transparent border-white/20 hover:border-white/50'}`}
                      />
                    ))}
                 </div>
@@ -515,17 +526,17 @@ const App: React.FC = () => {
                 <button 
                   disabled={selectedImage.index === selectedImage.images.length - 1}
                   onClick={() => setSelectedImage(prev => prev ? ({ ...prev, index: prev.index + 1 }) : null)}
-                  className="p-5 bg-white/5 text-white rounded-full disabled:opacity-5 hover:bg-white/10 transition-all active:scale-90"
+                  className="p-6 bg-white/5 text-white rounded-full disabled:opacity-5 hover:bg-white/10 transition-all active:scale-90 shadow-2xl"
                 >
-                  <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
+                  <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7" /></svg>
                 </button>
               </div>
 
               <button 
-                onClick={() => downloadImage(selectedImage.images[selectedImage.index], `ryden-pro-master-${Date.now()}.png`)} 
-                className="w-full py-6 bg-white text-black rounded-2xl font-black shadow-[0_30px_60px_rgba(255,255,255,0.05)] hover:bg-slate-50 hover:scale-[1.03] active:scale-95 transition-all uppercase tracking-[0.3em] text-xs"
+                onClick={() => downloadImage(selectedImage.images[selectedImage.index], `ryden-ultra-export-${Date.now()}.png`)} 
+                className="w-full py-8 bg-white text-black rounded-[2rem] font-black shadow-[0_40px_80px_rgba(255,255,255,0.08)] hover:bg-slate-50 hover:scale-[1.03] active:scale-95 transition-all uppercase tracking-[0.4em] text-[11px]"
               >
-                Export Masterpiece
+                Export Masterpiece Set
               </button>
             </div>
           </div>

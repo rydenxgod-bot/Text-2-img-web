@@ -29,9 +29,10 @@ export const fetchImages = async (
   prompt: string, 
   onProgress: (p: number, status: string) => void,
   signal: AbortSignal
-): Promise<string[]> => {
-  onProgress(5, "Initializing engines...");
+): Promise<{ images: string[], sources: string[] }> => {
+  onProgress(5, "Calibrating Primary Engines...");
   const encodedPrompt = encodeURIComponent(prompt.trim());
+  const masterSeed = Date.now();
   
   // 1. Flux Ai API
   const fetchFlux = async () => {
@@ -46,7 +47,7 @@ export const fetchImages = async (
     return null;
   };
 
-  // 2. Small Version API
+  // 2. Small Version API (Emergency Fallback)
   const fetchSmallVersion = async () => {
     try {
       const url = `https://text-to-img.apis-bj-devs.workers.dev/?prompt=${encodedPrompt}`;
@@ -67,35 +68,48 @@ export const fetchImages = async (
     return null;
   };
 
-  // 3. Pollination API - Guaranteed direct URL return
-  const fetchPollination = async () => {
-    const seed = Date.now() + Math.floor(Math.random() * 1000);
-    return `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&seed=${seed}&width=1024&height=1024`;
+  // 3. Pollination API (Direct URL - Highly Reliable)
+  const fetchPollination = () => {
+    return `https://image.pollinations.ai/prompt/${encodedPrompt}?nologo=true&seed=${masterSeed}&width=1024&height=1024`;
   };
 
-  onProgress(20, "Requesting images...");
+  onProgress(20, "Executing Priority Tasks...");
   
-  // Fetching all simultaneously
-  const [fluxRes, smallRes, pollRes] = await Promise.all([
-    fetchFlux().then(r => { onProgress(40, "Flux Ai ready..."); return r; }),
-    fetchSmallVersion().then(r => { onProgress(60, "Small Version ready..."); return r; }),
-    fetchPollination().then(r => { onProgress(80, "Pollination ready..."); return r; })
+  // Start Primary Engines
+  const [pollRes, fluxRes] = await Promise.all([
+    Promise.resolve(fetchPollination()), // Pollination is instant URL generation
+    fetchFlux().then(r => { onProgress(60, "Flux Engine Processed..."); return r; })
   ]);
 
-  onProgress(95, "Compiling Triple Output...");
-  
-  const results: string[] = [];
+  const images: string[] = [];
+  const sources: string[] = [];
 
-  // SEQUENCE: Pollination -> Flux -> Small Version
-  // We provide fallbacks if external APIs fail, but Pollination is guaranteed.
-  if (pollRes) results.push(pollRes);
-  if (fluxRes) results.push(fluxRes);
-  if (smallRes) results.push(smallRes);
+  if (pollRes) {
+    images.push(pollRes);
+    sources.push('Pollination');
+  }
   
-  if (results.length === 0) {
-    throw new Error("Critical engine failure. Please check your connection.");
+  if (fluxRes) {
+    images.push(fluxRes);
+    sources.push('Flux Ai');
   }
 
-  onProgress(100, "Done!");
-  return results;
+  // EMERGENCY FALLBACK LOGIC: 
+  // If one of the primary ones failed, trigger Small Version to maintain image count
+  if (images.length < 2) {
+    onProgress(80, "Primary failure detected. Activating Emergency Fallback...");
+    const smallRes = await fetchSmallVersion();
+    if (smallRes) {
+      images.push(smallRes);
+      sources.push('Small Version');
+    }
+  }
+
+  onProgress(100, "Generation Complete.");
+  
+  if (images.length === 0) {
+    throw new Error("All generation engines failed. Please try a different prompt.");
+  }
+
+  return { images, sources };
 };
