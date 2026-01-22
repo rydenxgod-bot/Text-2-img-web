@@ -76,11 +76,6 @@ Click this button to deploy instantly:
 
 ---
 
-## 🛠️ Run Locally (For Developers)
-
-### 1️⃣ Install Dependencies
-```bash
-npm install
 
 ---
 ##❤️ Credits
