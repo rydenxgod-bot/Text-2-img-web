@@ -1,20 +1,23 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 🖼️ Text to Image Web (RydenXGod Studio)
 
-# Run and deploy your AI Studio app
+A simple **Text → Image generator web app** built with **React + TypeScript** using the **Pollinations AI Image API**.
 
-This contains everything you need to run your app locally.
+Users can:
+- Enter a prompt
+- Generate AI images instantly
+- Download generated images
 
-View your app in AI Studio: https://ai.studio/apps/drive/1uCov9TTcANuSmffSI0UV7DQK0y7xiTjS
+---
 
-## Run Locally
+## 🚀 Live Features
 
-**Prerequisites:**  Node.js
+✅ Text to Image Generation  
+✅ Instant Preview (API returns direct image)  
+✅ No Logo Mode Clean HD Image 
+✅ Cache Bypass
+✅ Download Image Easy in one Tap
+✅ Clean & Fast UI  
 
+---
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+#
