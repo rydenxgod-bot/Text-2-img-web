@@ -1,4 +1,4 @@
-# 🖼️ Text to Image Web (Pollinations AI)
+# 🖼️ Text to Image Web (RydenXGod AI)
 
 A simple and fast **Text → Image generator web app** built using **React + TypeScript**.  
 Type any prompt, generate an AI image instantly, and download it in one click.
